@@ -66,6 +66,7 @@ export type ThreadLaunchWorkspaceStrategy =
       readonly baseRef: string;
       readonly branch?: string | undefined;
       readonly startFromOrigin?: boolean | undefined;
+      readonly workingDirectory?: string | undefined;
     };
 
 export interface ThreadLaunchInitialMessage {
@@ -438,7 +439,7 @@ const make = Effect.gen(function* () {
               refName: startRef,
               newRefName: branch!,
               baseRefName,
-              path: null,
+              path: input.workspaceStrategy.workingDirectory ?? null,
             },
             {
               progress: {

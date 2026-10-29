@@ -1,3 +1,5 @@
+import * as NodePath from "@effect/platform-node/NodePath";
+import * as Path from "effect/Path";
 import {
   CommandId,
   type RunId,
@@ -962,6 +964,7 @@ function timelineItem(input: {
 
 const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
+  const path = yield* Path.Path;
   const threadManagement = yield* ThreadManagementService.ThreadManagementService;
   const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
   const providerAdapters = yield* ProviderAdapterRegistry.ProviderAdapterRegistryV2;
@@ -2239,12 +2242,21 @@ const make = Effect.gen(function* () {
         parent.thread.interactionMode,
         input.interactionMode,
       );
+      if (input.workingDirectory !== undefined) {
+        if (input.isolation !== "worktree") {
+          return yield* failure(
+            "invalid_request",
+            'workingDirectory requires isolation "worktree".',
+          );
+        }
+      }
       let workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy | undefined;
       if (input.isolation === "worktree" && !isRetryOfAcceptedDelegation) {
         const project = yield* requireProject(parent.thread.projectId);
+        const parentCheckout = parent.thread.worktreePath ?? project.workspaceRoot;
         const base = yield* gitDriver
           .resolveCommit({
-            cwd: parent.thread.worktreePath ?? project.workspaceRoot,
+            cwd: parentCheckout,
             revision: "HEAD",
           })
           .pipe(
@@ -2267,7 +2279,14 @@ const make = Effect.gen(function* () {
               ),
             );
         }
-        workspaceStrategy = { type: "worktree", baseRef: base.commitSha, startFromOrigin: false };
+        workspaceStrategy = {
+          type: "worktree",
+          baseRef: base.commitSha,
+          startFromOrigin: false,
+          ...(input.workingDirectory === undefined
+            ? {}
+            : { workingDirectory: path.resolve(parentCheckout, input.workingDirectory) }),
+        };
       }
       // ThreadManagementService.dispatch is the chokepoint for this command
       // type's own enablement check, using the same command id and its
@@ -3110,4 +3129,4 @@ export const layer: Layer.Layer<
   | SecretRequests.SecretRequests
   | ServerSettings.ServerSettingsService
   | RemoteDelegation.RemoteDelegation
-> = Layer.effect(OrchestratorMcpService, make);
+> = Layer.effect(OrchestratorMcpService, make).pipe(Layer.provide(NodePath.layer));

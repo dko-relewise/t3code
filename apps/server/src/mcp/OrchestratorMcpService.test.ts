@@ -1,3 +1,4 @@
+import * as Path from "effect/Path";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import {
@@ -1464,6 +1465,149 @@ describe("OrchestratorMcpService provider resolution", () => {
       }),
     );
   });
+
+  it.effect.each(
+    ([false, true] as const).flatMap((parentHasWorktree) => [
+      {
+        parentHasWorktree,
+        isolation: undefined,
+        directory: "absolute",
+        error: 'requires isolation "worktree"',
+      },
+      {
+        parentHasWorktree,
+        isolation: "worktree" as const,
+        directory: "../sibling-worktree",
+        error: null,
+      },
+      {
+        parentHasWorktree,
+        isolation: "worktree" as const,
+        directory: ".workspace/hidden-worktree",
+        error: null,
+      },
+      { parentHasWorktree, isolation: "worktree" as const, directory: "absolute", error: null },
+    ]),
+  )(
+    "validates and resolves workingDirectory ($directory, parent worktree: $parentHasWorktree)",
+    ({ isolation, directory, error, parentHasWorktree }) =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const projectRoot = path.resolve("parent-checkout");
+        const parentWorktree = path.resolve("worktrees", "parent");
+        const parentCheckout = parentHasWorktree ? parentWorktree : projectRoot;
+        const workingDirectory =
+          directory === "absolute" ? path.resolve("child-checkout") : directory;
+        const expectedDirectory =
+          directory === "../sibling-worktree"
+            ? path.join(path.dirname(parentCheckout), "sibling-worktree")
+            : directory === ".workspace/hidden-worktree"
+              ? path.join(parentCheckout, ".workspace", "hidden-worktree")
+              : workingDirectory;
+        let delegated = false;
+        const commands: OrchestrationV2ServerCommand[] = [];
+        const task = {
+          id: taskId,
+          threadId: parentThreadId,
+          origin: "app_owned",
+          childThreadId,
+          status: "running",
+          result: null,
+        };
+        const layerDependencies = Layer.mergeAll(
+          NodeServices.layer,
+          Layer.mock(ThreadManagementService.ThreadManagementService)({
+            hasReceipt: () => Effect.succeed(false),
+            isProviderInstanceEnabledForProject: () => Effect.succeed(true),
+            getThreadRecords: (id) =>
+              Effect.succeed(
+                id === parentThreadId
+                  ? {
+                      ...parentProjection(delegated ? [task] : []),
+                      thread: {
+                        ...parentProjection([]).thread,
+                        worktreePath: parentHasWorktree ? parentWorktree : null,
+                      },
+                    }
+                  : childProjection,
+              ),
+            dispatch: (command) =>
+              Effect.sync(() => {
+                commands.push(command);
+                delegated = true;
+                return {
+                  sequence: 1,
+                  storedEvents: [
+                    {
+                      sequence: 1,
+                      commandId: null,
+                      event: { type: "subagent.updated", payload: task },
+                    },
+                  ],
+                } as never;
+              }),
+          }),
+          ServerSettings.layerTest(),
+          providerRegistryLayer([
+            providerSnapshot({
+              instanceId: codexInstanceId,
+              driver: ProviderDriverKind.make("codex"),
+              model: "gpt-5.4",
+            }),
+          ]),
+          adapterRegistryLayer([codexInstanceId]),
+          Layer.mock(ProjectService.ProjectService)({
+            getById: () =>
+              Effect.succeedSome({
+                id: projectId,
+                title: "Project",
+                workspaceRoot: projectRoot,
+              } as never),
+          }),
+          Layer.mock(SecretRequests.SecretRequests)({}),
+          Layer.mock(RemoteDelegation.RemoteDelegation)({}),
+          Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+        );
+        yield* Effect.gen(function* () {
+          const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+          const result = service.delegateTask(scope, {
+            task: "Build the feature.",
+            isolation,
+            workingDirectory,
+          });
+          if (error !== null) {
+            const rejected = yield* result.pipe(Effect.flip);
+            assert.equal(rejected.code, "invalid_request");
+            assert.include(rejected.message, error);
+            assert.equal(commands.length, 0);
+          } else {
+            yield* result;
+            const command = commands[0];
+            assert.equal(command?.type, "delegated_task.request");
+            if (command?.type === "delegated_task.request") {
+              assert.deepEqual(command.workspaceStrategy, {
+                type: "worktree",
+                baseRef: "parent-head",
+                startFromOrigin: false,
+                workingDirectory: expectedDirectory,
+              });
+            }
+          }
+        }).pipe(
+          Effect.provide(
+            OrchestratorMcpService.layer.pipe(
+              Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
+              Layer.provide(
+                Layer.mock(GitVcsDriver.GitVcsDriver)({
+                  resolveCommit: () => Effect.succeed({ commitSha: "parent-head" } as never),
+                }),
+              ),
+              Layer.provide(layerDependencies),
+            ),
+          ),
+        );
+      }).pipe(Effect.provide(NodeServices.layer)),
+  );
 
   it.effect("rejects delegation to a provider without a registered adapter", () =>
     Effect.gen(function* () {

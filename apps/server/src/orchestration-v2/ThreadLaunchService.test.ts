@@ -975,6 +975,63 @@ it.effect("launches a worktree request for Scratch at the root, in its own folde
   }).pipe(Effect.provide(harness.layer));
 });
 
+it.live("creates and binds a worktree at workingDirectory from the requested commit", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const git = yield* GitVcsDriver.GitVcsDriver;
+      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "launch-destination-" });
+      const cwd = `${directory}/repo`;
+      const destination = `${directory}/custom/child-checkout`;
+      yield* fs.makeDirectory(cwd);
+      const command = (at: string, args: string[]) =>
+        git.execute({ operation: "launch-test", cwd: at, args });
+      yield* command(cwd, ["init", "-b", "main"]);
+      yield* command(cwd, ["config", "user.name", "Test"]);
+      yield* command(cwd, ["config", "user.email", "test@example.test"]);
+      yield* command(cwd, ["commit", "--allow-empty", "-m", "initial"]);
+      const head = (yield* command(cwd, ["rev-parse", "HEAD"])).stdout.trim();
+      const harness = makeHarness({
+        createWorktree: (input, options) => git.createWorktree({ ...input, cwd }, options),
+      });
+      yield* Effect.gen(function* () {
+        const launches = yield* ThreadLaunch.ThreadLaunchService;
+        const launched = yield* launches.launch(
+          launchInput({
+            command: "command:launch:destination",
+            thread: "thread:launch:destination",
+            message: "Build the feature.",
+            workspace: {
+              type: "worktree",
+              baseRef: head,
+              branch: "child",
+              startFromOrigin: false,
+              workingDirectory: destination,
+            },
+          }),
+        );
+        const projection = yield* preparationSettled(launched.threadId);
+        assert.equal(projection.runs[0]?.status, "starting");
+        assert.equal(projection.thread.worktreePath, destination);
+        assert.equal((yield* command(destination, ["rev-parse", "HEAD"])).stdout.trim(), head);
+        assert.equal(
+          (yield* command(destination, ["branch", "--show-current"])).stdout.trim(),
+          "child",
+        );
+      }).pipe(Effect.provide(harness.layer));
+    }).pipe(
+      Effect.provide(
+        GitVcsDriver.layer.pipe(
+          Layer.provide(
+            ServerConfig.layerTest(process.cwd(), { prefix: "launch-destination-git-" }),
+          ),
+          Layer.provideMerge(NodeServices.layer),
+        ),
+      ),
+    ),
+  ),
+);
+
 it.effect("stores a Scratch scheduled task at the root and keeps worktrees elsewhere", () => {
   const harness = scratchHarness();
   return Effect.gen(function* () {

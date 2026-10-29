@@ -170,6 +170,10 @@ export const OrchestratorMcpDelegateTaskInput = Schema.Struct({
   target: Schema.optional(OrchestratorMcpTarget),
   title: Schema.optional(OrchestratorMcpTitle),
   role: Schema.optional(OrchestratorMcpTaskRole),
+  workingDirectory: Schema.optional(TrimmedNonEmptyString).annotate({
+    description:
+      "Destination path for the new Git worktree. Relative paths resolve from the parent checkout directory. Requires isolation 'worktree'. Omit to use the default worktree location.",
+  }),
   isolation: Schema.optional(
     Schema.Literals(["shared", "worktree"]).annotate({
       description:

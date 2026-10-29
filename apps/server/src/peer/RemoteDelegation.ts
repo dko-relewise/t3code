@@ -212,6 +212,12 @@ const make = Effect.gen(function* () {
       const { target } = input;
       // A worktree there would branch from a commit this checkout has and the
       // other may not, so a remote task runs in that project's checkout.
+      if (input.workingDirectory !== undefined) {
+        return yield* new OrchestratorMcpFailure({
+          code: "invalid_request",
+          message: "workingDirectory is only supported for local delegated tasks.",
+        });
+      }
       if (input.isolation === "worktree") {
         return yield* new OrchestratorMcpFailure({
           code: "invalid_request",
