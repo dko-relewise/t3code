@@ -3,6 +3,17 @@
 T3 Code integrates with GitHub, GitLab, Forgejo, Gitea, Bitbucket, Azure DevOps, and GitCafe to clone
 and publish repositories, create pull requests, and review changes.
 
+## Manage Git remotes manually
+
+To manage remote updates yourself, enable **Settings → Source control → Manual Git remote
+control** for the environment. T3 Code then blocks `git fetch`, `git pull`, and `git push`,
+including background updates and remote steps in worktree and pull request workflows. Run these
+commands in a terminal when needed, or turn the setting off to let T3 Code run them again.
+Automatic submodule checkout also pauses because it can fetch missing commits.
+
+This setting controls T3 Code's Git operations. Agents and scripts running in a terminal still
+follow their own instructions and permissions.
+
 ## Review turn changes
 
 A turn's changed files and diff show only the turn's own work. When a turn pulls, merges, or

@@ -69,6 +69,9 @@ const SETTINGS_SEARCH_TERMS = {
     "auth",
   ],
   SettingsEnvironmentSourceControl: [
+    "manual git remote control",
+    "fetch",
+    "push",
     "git",
     "pull requests",
     "co-authors",

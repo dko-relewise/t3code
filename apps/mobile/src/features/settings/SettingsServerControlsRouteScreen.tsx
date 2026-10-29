@@ -383,6 +383,16 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
 
               {props.page === "source-control" ? (
                 <>
+                  <SettingsSection title="Git remote operations">
+                    <SettingsSwitchRow
+                      icon="arrow.triangle.branch"
+                      label="Manual Git remote control"
+                      subtitle="Block T3 Code from running git fetch, git pull, and git push, including background refreshes and worktree or pull request workflows. Run these commands manually in a terminal."
+                      value={uniform("manualGitRemoteControl")}
+                      disabled={disabledFor("manualGitRemoteControl")}
+                      onValueChange={(value) => write({ manualGitRemoteControl: value })}
+                    />
+                  </SettingsSection>
                   {projectSelected ? null : (
                     <SourceControlSignInSection
                       environments={selectedTargets}

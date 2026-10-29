@@ -10,6 +10,8 @@ import type {
   VcsDiscoveryItem,
 } from "@t3tools/contracts";
 import { useSettingsScope } from "./SettingsScopeContext";
+import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
+import { ScopedSwitch } from "./ScopedSwitch";
 import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
 import { cn } from "../../lib/utils";
 import { useEnvironmentQuery } from "../../state/query";
@@ -38,6 +40,7 @@ import { RedactedSensitiveText } from "./RedactedSensitiveText";
 import { SourceControlWritingSettingsSection } from "./SourceControlWritingSettings";
 import {
   SettingsPageContainer,
+  SettingsRow,
   SettingsSearchTarget,
   SettingsSection,
   useSettingsSearchTargetId,
@@ -58,6 +61,27 @@ const VCS_ICONS: Partial<Record<VcsDriverKind, Icon>> = {
 };
 
 const SOURCE_CONTROL_SKELETON_ROWS = ["primary", "secondary"] as const;
+
+function ManualGitRemoteControlRow() {
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  return (
+    <SettingsRow
+      serverScoped
+      settingKeys={["manualGitRemoteControl"]}
+      {...searchableSetting("manual-git-remote-control")}
+      description="Block T3 Code from running git fetch, git pull, and git push, including background refreshes and worktree or pull request workflows. Run these commands manually in a terminal."
+      control={
+        <ScopedSwitch
+          settingKeys={["manualGitRemoteControl"]}
+          checked={settings.manualGitRemoteControl}
+          onCheckedChange={(checked) => updateSettings({ manualGitRemoteControl: checked })}
+          aria-label="Manual Git remote control"
+        />
+      }
+    />
+  );
+}
 function optionLabel(value: Option.Option<string>): string | null {
   return Option.getOrNull(value);
 }
@@ -466,6 +490,9 @@ export function SourceControlSettingsPanel() {
 
   return (
     <SettingsPageContainer>
+      <SettingsSection title="Git remote operations">
+        <ManualGitRemoteControlRow />
+      </SettingsSection>
       <ProjectDefaultsSettings category="source-control" />
       {environmentId === null ? (
         <SettingsSection id={searchableSetting("source-control").id} title="Server environment">

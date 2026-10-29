@@ -24,6 +24,7 @@ import type { SourceControlProcessInput } from "@t3tools/source-control-core/ser
 
 import { gitCommandDuration, gitCommandsTotal, withMetrics } from "../observability/Metrics.ts";
 import * as ProcessRunner from "../processRunner.ts";
+import * as ServerSettings from "../serverSettings.ts";
 
 export interface VcsProcessInput {
   readonly operation: string;
@@ -60,6 +61,44 @@ export class VcsProcess extends Context.Service<
     readonly run: (input: VcsProcessInput) => Effect.Effect<VcsProcessOutput, VcsError>;
   }
 >()("t3/vcs/VcsProcess") {}
+
+export class ManualGitRemoteControl extends Context.Reference<Effect.Effect<boolean>>(
+  "t3/vcs/ManualGitRemoteControl",
+  { defaultValue: () => Effect.succeed(false) },
+) {}
+
+export const layerManualGitRemoteControl = Layer.effect(
+  ManualGitRemoteControl,
+  Effect.gen(function* () {
+    const settings = yield* ServerSettings.ServerSettingsService;
+    return settings.getSettings.pipe(
+      Effect.map((value) => value.manualGitRemoteControl),
+      Effect.orDie,
+    );
+  }),
+);
+
+function isGitRemoteCommand(input: VcsProcessInput): boolean {
+  // These hosting CLI checkouts fetch through their own Git subprocesses.
+  if (input.command === "glab") return input.args[0] === "mr" && input.args[1] === "checkout";
+  if (input.command === "tea") return input.args[0] === "pulls" && input.args[1] === "checkout";
+  if (input.command !== "git") return false;
+  for (let index = 0; index < input.args.length; index++) {
+    const arg = input.args[index]!;
+    if (["-c", "-C", "--git-dir", "--work-tree", "--namespace", "--config-env"].includes(arg)) {
+      index++;
+    } else if (!arg.startsWith("-")) {
+      return (
+        arg === "fetch" ||
+        arg === "pull" ||
+        arg === "push" ||
+        // Submodule checkout fetches missing commits through its own Git subprocesses.
+        (arg === "submodule" && input.args[index + 1] === "update")
+      );
+    }
+  }
+  return false;
+}
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 1_000_000;
@@ -183,6 +222,7 @@ const canRetryFullFsync = (stderr: string) =>
 export const make = Effect.gen(function* () {
   const processRunner = yield* ProcessRunner.ProcessRunner;
   const hostPlatform = yield* HostProcess.Platform;
+  const manualGitRemoteControl = yield* ManualGitRemoteControl;
   const vcsProcesses = yield* Semaphore.make(VCS_PROCESS_CONCURRENCY);
   const keyedProcesses = new Map<string, Semaphore.Semaphore>();
   const keyedPermit = (concurrency: NonNullable<VcsProcessInput["concurrency"]>) => {
@@ -274,6 +314,16 @@ export const make = Effect.gen(function* () {
       cwd: input.cwd,
       argumentCount: input.args.length,
     };
+
+    if (isGitRemoteCommand(input) && (yield* manualGitRemoteControl)) {
+      return yield* new VcsProcessExitError({
+        ...baseError,
+        exitCode: 1,
+        failureKind: "command-failed",
+        detail:
+          "Manual Git remote control is enabled. Run git fetch, git pull, and git push manually in a terminal.",
+      });
+    }
 
     let result = yield* spawn(input, baseError);
 

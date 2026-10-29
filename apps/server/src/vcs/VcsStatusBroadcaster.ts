@@ -155,8 +155,10 @@ export const layerAutomaticFetchInterval = Layer.effect(
   Effect.gen(function* () {
     const serverSettings = yield* ServerSettings.ServerSettingsService;
     return serverSettings.getSettings.pipe(
-      Effect.map(
-        (settings) => resolveServerBackgroundActivitySettings(settings).automaticGitFetchInterval,
+      Effect.map((settings) =>
+        settings.manualGitRemoteControl
+          ? Duration.zero
+          : resolveServerBackgroundActivitySettings(settings).automaticGitFetchInterval,
       ),
       Effect.orElseSucceed(() => DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL),
     );
@@ -180,6 +182,7 @@ export const layerAutoPullPolicy = Layer.effect(
           const project = yield* projects.findActiveByWorkspaceRoot(cwd);
           if (project._tag === "None") return false;
           const settings = yield* serverSettings.getSettings;
+          if (settings.manualGitRemoteControl) return false;
           return resolveProjectSettings(settings, project.value.projectId).settings.defaultAutoPull;
         },
         Effect.orElseSucceed(() => false),

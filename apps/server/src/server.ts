@@ -1101,7 +1101,13 @@ const layerMakeServer = Layer.unwrap(
       Layer.provideMerge(layerHttpServer),
       Layer.provide(layerApplicationObservability),
       Layer.provideMerge(FetchHttpClient.layer),
-      Layer.provide(VcsProcess.layer),
+      Layer.provide(
+        VcsProcess.layer.pipe(
+          Layer.provide(
+            VcsProcess.layerManualGitRemoteControl.pipe(Layer.provide(layerServerSettings)),
+          ),
+        ),
+      ),
       Layer.provideMerge(AgentScopeLive.layer),
       Layer.provideMerge(layerPlatformServices),
     );

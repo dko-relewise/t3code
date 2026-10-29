@@ -923,6 +923,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["agent opens browser device simulator pop into view hide"],
   },
   {
+    id: "manual-git-remote-control",
+    title: "Manual Git remote control",
+    to: "/settings/source-control",
+    scope: "environment",
+    searchTerms: ["manual git remote control disable automatic fetch pull push terminal"],
+  },
+  {
     id: "automatic-pull",
     title: "Automatically pull",
     to: "/settings/source-control",

@@ -14,8 +14,13 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import { ChildProcessSpawner } from "effect/process";
 
-import { VcsProcessExitError, VcsProcessSpawnError } from "@t3tools/contracts";
+import {
+  DEFAULT_SERVER_SETTINGS,
+  VcsProcessExitError,
+  VcsProcessSpawnError,
+} from "@t3tools/contracts";
 import * as ProcessRunner from "../processRunner.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as VcsProcess from "./VcsProcess.ts";
 
 const encodeExitError = Schema.encodeEffect(Schema.fromJsonString(VcsProcessExitError));
@@ -38,6 +43,17 @@ const baseInput = {
   cwd: "/workspace",
 } satisfies VcsProcess.VcsProcessInput;
 
+const successfulProcessOutput = {
+  code: ChildProcessSpawner.ExitCode(0),
+  stdout: "",
+  stderr: "",
+  stdoutTruncated: false,
+  stderrTruncated: false,
+  timedOut: false,
+  stdoutInvalidUtf8: false,
+  stderrInvalidUtf8: false,
+} satisfies ProcessRunner.ProcessRunOutput;
+
 const captureProcessResult = (
   result: Effect.Effect<ProcessRunner.ProcessRunOutput, ProcessRunner.ProcessRunError>,
 ) =>
@@ -51,6 +67,75 @@ const captureProcessResult = (
   );
 
 describe("VcsProcess.run", () => {
+  it.effect.each([
+    { command: "git", args: ["fetch", "origin"] },
+    { command: "git", args: ["pull", "--ff-only"] },
+    { command: "git", args: ["push", "origin", "HEAD"] },
+    { command: "git", args: ["-c", "core.fsync=none", "fetch", "origin"] },
+    { command: "git", args: ["-C", "/repo", "--git-dir=.git", "push"] },
+    { command: "git", args: ["submodule", "update", "--init", "--recursive"] },
+    { command: "glab", args: ["mr", "checkout", "--", "42"] },
+    { command: "tea", args: ["pulls", "checkout", "--repo", "owner/repo", "42"] },
+  ])("blocks remote commands in manual Git remote control mode: $command $args", (input) =>
+    Effect.gen(function* () {
+      let spawned = false;
+      const service = yield* VcsProcess.make.pipe(
+        Effect.provideService(VcsProcess.ManualGitRemoteControl, Effect.succeed(true)),
+        Effect.provideService(
+          ProcessRunner.ProcessRunner,
+          ProcessRunner.ProcessRunner.of({
+            run: () =>
+              Effect.sync(() => {
+                spawned = true;
+                return successfulProcessOutput;
+              }),
+          }),
+        ),
+      );
+      const error = yield* Effect.flip(service.run({ ...baseInput, ...input }));
+      expect(error).toMatchObject({
+        _tag: "VcsProcessExitError",
+        detail:
+          "Manual Git remote control is enabled. Run git fetch, git pull, and git push manually in a terminal.",
+      });
+      expect(spawned).toBe(false);
+    }),
+  );
+
+  it.effect("applies manual remote control changes to an existing process service", () =>
+    Effect.gen(function* () {
+      const settings = yield* Ref.make({
+        ...DEFAULT_SERVER_SETTINGS,
+        manualGitRemoteControl: true,
+      });
+      const spawned: Array<ReadonlyArray<string>> = [];
+      const service = yield* VcsProcess.make.pipe(
+        Effect.provide(
+          VcsProcess.layerManualGitRemoteControl.pipe(
+            Layer.provide(
+              Layer.mock(ServerSettings.ServerSettingsService)({ getSettings: Ref.get(settings) }),
+            ),
+          ),
+        ),
+        Effect.provideService(
+          ProcessRunner.ProcessRunner,
+          ProcessRunner.ProcessRunner.of({
+            run: (input) =>
+              Effect.sync(() => {
+                spawned.push(input.args ?? []);
+                return successfulProcessOutput;
+              }),
+          }),
+        ),
+      );
+      yield* service.run({ ...baseInput, args: ["log", "--grep=fetch"] });
+      yield* Effect.flip(service.run({ ...baseInput, args: ["fetch"] }));
+      yield* Ref.update(settings, (value) => ({ ...value, manualGitRemoteControl: false }));
+      yield* service.run({ ...baseInput, args: ["fetch"] });
+      expect(spawned).toEqual([["log", "--grep=fetch"], ["fetch"]]);
+    }),
+  );
+
   it.effect("explains a locked Git index and allows restore after the lock is released", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
